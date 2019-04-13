@@ -101,6 +101,7 @@ int main (int argc, char ** argv){
 	currentThread.detach();
     }
 
+  close(masterSocket);
   return 0;
 
 }
