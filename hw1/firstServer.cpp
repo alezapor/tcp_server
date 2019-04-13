@@ -1,6 +1,3 @@
-#include <iostream>
-using namespace std;
-
 #include <cstdlib>
 #include <cstdio>
 #include <sys/socket.h> // socket(), bind(), connect(), listen()
@@ -8,18 +5,22 @@ using namespace std;
 #include <netinet/in.h> // struct sockaddr_in
 #include <arpa/inet.h> // htons(), htonl()
 #include <strings.h> // bzero()
-#include <string.h>
+//#include <string.h>
 #include <thread>
-class CRobotClient {
+#include <iostream>
 
+using namespace std;
+
+class CRobotClient {
 public:
 	CRobotClient(int socket) : m_Socket(socket) {}
 	void authentication();
 	void moveToGoal();
 	void pickUpMessage();
+
 private:
 	int m_Socket;
-}
+};
 
 void CRobotClient::authentication(){
 	cout << "Authentication" << endl;
@@ -35,8 +36,8 @@ void CRobotClient::pickUpMessage(){
 }
 
 
-void * socketThread(void * dummyArg){
-	int slaveSocket = *((int *) dummyArg);
+void socketThread(void * dummyArg){
+	int slaveSocket = (int) (intptr_t) dummyArg;
 	CRobotClient currentRobot(slaveSocket);
 	currentRobot.authentication();
 	currentRobot.moveToGoal();
@@ -53,8 +54,8 @@ int main (int argc, char ** argv){
 	
 	// Create master socket
 	int masterSocket = socket(AF_INET, /*IPv4*/
-								SOCK_STREAM,
-								IPPROTO_TCP);
+					SOCK_STREAM,
+					IPPROTO_TCP);
 	if (masterSocket < 0){
 		perror("Unable to create a master socket");
 		return -1;
@@ -79,7 +80,7 @@ int main (int argc, char ** argv){
 	}
 	
 	if(listen(masterSocket, SOMAXCONN) < 0){
-		perror("Error listen()!");
+		perror("Error listen()");
 		close(masterSocket);
 		return -1;
 	}
@@ -89,14 +90,14 @@ int main (int argc, char ** argv){
 
     while(1){
         int slaveSocket = accept(masterSocket, 
-				(struct sockaddr *) &remoteAddr, &addr_size);
+				(struct sockaddr *) &remoteAddr, &addrSize);
 
 	if (slaveSocket < 0){
 		perror("Unable to accept a slave socket");
 		return -1;
 	}
 	
-	thread currentThread (socketThread, slaveSocket);
+	thread currentThread (socketThread, (void *)(intptr_t) slaveSocket);
 	currentThread.detach();
     }
 
