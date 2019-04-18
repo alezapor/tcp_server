@@ -19,7 +19,10 @@ using namespace std;
 #include <sys/types.h>
 #include <netdb.h>
 #include <string.h>
+#include <thread>
+#include <chrono>
 
+#define BUFFER_SIZE 1024
 
 int main(int argc, char **argv) {
 	if(argc < 3){
@@ -54,9 +57,26 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
-#define BUFFER_SIZE 10240
 	char buffer[BUFFER_SIZE];
 	if(send(s, "Mnau!\a\b", 7, 0) < 0){
+			perror("Nemohu odeslat data!");
+			close(s);
+			return -3;
+		}
+	std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+	if(send(s, "20576\a\b", 7, 0) < 0){
+			perror("Nemohu odeslat data!");
+			close(s);
+			return -3;
+		}
+	std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+	if(send(s, "OK 10 0\a\b", 9, 0) < 0){
+			perror("Nemohu odeslat data!");
+			close(s);
+			return -3;
+		}
+	std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+	if(send(s, "OK 10 1\a\b", 9, 0) < 0){
 			perror("Nemohu odeslat data!");
 			close(s);
 			return -3;
