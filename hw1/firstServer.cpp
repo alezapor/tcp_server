@@ -52,8 +52,8 @@ public:
 			else this->dir = DOWN;
 		} 
 		else {
-			if(x>0) this->dir = LEFT;
-			else this->dir = RIGHT;
+			if(x>0) this->dir = RIGHT;
+			else this->dir = LEFT;
 		}
 	} 
 	int getX() {return x;}
@@ -110,8 +110,8 @@ public:
 	bool goRight(struct timeval * tv);
 	bool goUp(struct timeval * tv);
 	bool move(struct timeval * tv);
-	void turnLeft(struct timeval * tv);
-	void turnRight(struct timeval * tv);
+	bool turnLeft(struct timeval * tv);
+	bool turnRight(struct timeval * tv);
 	bool goDown(struct timeval * tv);
 	bool DFS(int i, int j, struct timeval * tv); 
 	int receivePackage(int & recvSize, struct timeval * tv, char * receivedPackage, int max);
@@ -125,25 +125,34 @@ private:
 };
 
 bool CRobotClient::recharging(){
+	int messageSize;
 	struct timeval timeout;
 	timeout.tv_sec = 5;
 	timeout.tv_usec = 0;
 	int recvSize = 0;
+	setsockopt(m_Socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
 	char receivedPackage[BUFFER_SIZE];
-	if(receivePackage(recvSize, &timeout, receivedPackage) == -6){
+	if(receivePackage(recvSize, &timeout, receivedPackage, 12) != 0){
 		messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
 	   	send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
 		return false;
 
 	}
-	if (recvSize > 2 && memcmp(receivedPackage, "FULL POWER\a\b") != 0){
-		cout << "receivedPackage: " << receivedPackage << endl;
+	if (recvSize > 2 && memcmp(receivedPackage, "FULL POWER\a\b", 12) != 0){
 		bzero(&m_SendBuffer, sizeof(m_SendBuffer));
 		messageSize = sprintf(m_SendBuffer, "302 LOGIC ERROR\a\b");
 		send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+		close(m_Socket);
 		return false;
 	}
-	return true;
+	cout << "receivedPackage: " << receivedPackage << endl;
+	if (memcmp(receivedPackage, "FULL POWER\a\b", 12) == 0) {
+		//send(m_Socket, m_SendBuffer, BUFFER_SIZE, MSG_NOSIGNAL);
+		timeout.tv_sec = 1;
+		setsockopt(m_Socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);	
+		return true;
+	}
+	return false;
 }
 
 int CRobotClient::receivePackage(int & recvSize, struct timeval * tv, char * receivedPackage, int maxSize = 12) {
@@ -162,6 +171,12 @@ int CRobotClient::receivePackage(int & recvSize, struct timeval * tv, char * rec
 			    memcpy(m_RecvBuffer, copyArray, BUFFER_SIZE);	    
 			    cout << "BUFF:(0) " << (int)m_RecvBuffer[1] <<endl;
 			    m_BufferTop -= recvSize;
+			    if(memcmp(receivedPackage, "RECHARGING\a\b", 12) == 0){
+				if(recharging()) {
+					return receivePackage(recvSize,tv,receivedPackage, maxSize);
+				}
+				else return -7;
+			    }
 			    break;
 		}	
 		FD_ZERO(&set);
@@ -198,19 +213,18 @@ int CRobotClient::receivePackage(int & recvSize, struct timeval * tv, char * rec
 			    memcpy(m_RecvBuffer, copyArray, BUFFER_SIZE);	    
 			    m_BufferTop -= recvSize;
 			    cout << "BUFF:(1) " << (int)m_RecvBuffer[1] <<endl;
-			    if(memcmp(receivedPackage, "RECHARGING\a\b") == 0){
-				if(recharging()) {
-					receivePackage(recvSize,tv,receivedPackage, maxSize);
-					return 0;
-				}
-				else return -7;
-			    }
-			    //TODO
 				break;
 			}	
        		}
 		if(counter == 0 && subStr == NULL) return -6;
 		m_BufferTop += maxSize - counter;
+		if(memcmp(receivedPackage, "RECHARGING\a\b", 12) == 0){
+				cout << "RECHarhing" <<endl;
+				if(recharging()) {
+					return receivePackage(recvSize,tv,receivedPackage, maxSize);
+				}
+				else return -7;
+		}
 		if(counter == (unsigned) maxSize){
 			perror("Chyba pri cteni ze socketu.");
 			close(m_Socket);
@@ -228,10 +242,10 @@ bool CRobotClient::goUp(struct timeval * tv){
 			if (!move(tv)) return false;
 			break;
 		case RIGHT: case DOWN:
-			turnLeft(tv);
+			if (!turnLeft(tv)) return false;;
 			break;
 		default:
-			turnRight(tv);
+			if (!turnRight(tv)) return false;;
 	}
 	return true;
 }
@@ -242,10 +256,10 @@ bool CRobotClient::goDown(struct timeval * tv){
 			if (!move(tv)) return false;
 			break;
 		case LEFT: case UP:
-			turnLeft(tv);
+			if (!turnLeft(tv)) return false;;
 			break;
 		default:
-			turnRight(tv);
+			if (!turnRight(tv)) return false;;
 	}
 	return true;
 }
@@ -256,10 +270,10 @@ bool CRobotClient::goLeft(struct timeval * tv){
 			if (!move(tv)) return false;
 			break;
 		case RIGHT: case UP:
-			turnLeft(tv);
+			if (!turnLeft(tv)) return false;;
 			break;
 		default:
-			turnRight(tv);
+			if (!turnRight(tv)) return false;;
 	}
 	return true;
 }
@@ -270,10 +284,10 @@ bool CRobotClient::goRight(struct timeval * tv){
 			if (!move(tv)) return false;
 			break;
 		case LEFT: case UP:
-			turnRight(tv);
+			if (!turnRight(tv)) return false;;
 			break;
 		default:
-			turnLeft(tv);
+			if (!turnLeft(tv)) return false;;
 	}
 	return true;
 }
@@ -321,24 +335,28 @@ bool CRobotClient::move(struct timeval * tv){
 	char receivedPackage[BUFFER_SIZE];
 	char okStr[3] = {0};
 	messageSize = sprintf(m_SendBuffer, "102 MOVE\a\b");
-	send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
-	receivePackage(recvSize, tv, receivedPackage);
-	if (recvSize > 2){
-		if (sscanf(receivedPackage, "%2s%d%d", okStr, &x1, &y1) != 3 || !checkMove(receivedPackage)){
+	while (true){
+		send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+		if(receivePackage(recvSize, tv, receivedPackage) != 0) return false;
+		if (recvSize > 2){
+			if (sscanf(receivedPackage, "%2s%d%d", okStr, &x1, &y1) != 3 || !checkMove(receivedPackage)){
 			messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
-	   	 send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+	   		send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
 			return false;
 		}
+		if (x1 != this->m_Coordinates.getX() + neighs[(int)this->m_Coordinates.getDir()][0]
+			|| y1 != this->m_Coordinates.getY() + neighs[(int)this->m_Coordinates.getDir()][1]) continue;
 		this->m_Coordinates.move();
-	bzero(&receivedPackage, sizeof(receivedPackage));
-	cout << "Move (" << x1 << ", " << y1 << ")" <<endl;
+		bzero(&receivedPackage, sizeof(receivedPackage));
+		cout << "Move (" << x1 << ", " << y1 << ")" <<endl;
+		}
+		else {
+			messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
+	   	 	send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+			return false;
+		}
+		return true;
 	}
-	else {
-		messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
-	   	 send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
-		return false;
-	}
-	return true;
 }
 
 bool CRobotClient::moveTo(int i, int j, struct timeval * timeout){
@@ -368,24 +386,26 @@ bool CRobotClient::moveTo(int i, int j, struct timeval * timeout){
 	return true; 
 }
 
-void CRobotClient::turnLeft(struct timeval * tv){
+bool CRobotClient::turnLeft(struct timeval * tv){
 	int recvSize, messageSize;
 	char receivedPackage[BUFFER_SIZE];
 	messageSize = sprintf(m_SendBuffer, "103 TURN LEFT\a\b");
 	send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
-	receivePackage(recvSize, tv, receivedPackage);
+	if(receivePackage(recvSize, tv, receivedPackage) != 0) return false;
 	this->m_Coordinates.turnLeft();
 	bzero(&receivedPackage, sizeof(receivedPackage));
+	return true;
 }
 
-void CRobotClient::turnRight(struct timeval * tv){
+bool CRobotClient::turnRight(struct timeval * tv){
 	int recvSize, messageSize;
 	char receivedPackage[BUFFER_SIZE];
 	messageSize = sprintf(m_SendBuffer, "104 TURN RIGHT\a\b");
 	send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
-	receivePackage(recvSize, tv, receivedPackage);
+	if(receivePackage(recvSize, tv, receivedPackage) != 0) return false;
 	this->m_Coordinates.turnRight();
 	bzero(&receivedPackage, sizeof(receivedPackage));
+	return true;
 }
 
 bool CRobotClient::authentication(){
@@ -402,8 +422,11 @@ bool CRobotClient::authentication(){
 	timeout.tv_usec = 0;
 	setsockopt(m_Socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
 	char receivedPackage[BUFFER_SIZE];
-	receivePackage(recvSize, &timeout, receivedPackage);
-
+	if(receivePackage(recvSize, &timeout, receivedPackage) != 0){
+	    messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
+	    send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+	    return false;
+	}
 	if (recvSize > 2){
 		messageSize = 0;
 		for (int i = 0; i < recvSize-2; ++i) {
@@ -427,8 +450,12 @@ bool CRobotClient::authentication(){
 	recvSize = 0;
 	//bzero(&m_RecvBuffer, sizeof(m_RecvBuffer));
 	bzero(&m_SendBuffer, sizeof(m_SendBuffer));
-	receivePackage(recvSize, &timeout, receivedPackage, 7);
-	if (recvSize > 2){
+	if(receivePackage(recvSize, &timeout, receivedPackage, 12) != 0) {
+	    messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
+	    send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+	    return false;
+	}
+	if (recvSize > 2 && recvSize <= 7){
 		for (int i = 0; i < recvSize-2; i++) {
 			if (receivedPackage[i] <'0' || receivedPackage[i] >'9')		
 			{
@@ -476,8 +503,11 @@ bool CRobotClient::moveToGoal(){
 	bzero(&m_SendBuffer, sizeof(m_SendBuffer));
 	messageSize = sprintf(m_SendBuffer, "102 MOVE\a\b");
 	send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
-	receivePackage(recvSize, &timeout, receivedPackage);
-	
+	if(receivePackage(recvSize, &timeout, receivedPackage) != 0) {
+   	    messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
+	    send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+	    return false;
+	}
 	if (recvSize > 2){
 		if (sscanf(receivedPackage, "%2s%d%d", okStr, &x, &y) != 3 || !checkMove(receivedPackage)){
 			messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
@@ -496,27 +526,34 @@ bool CRobotClient::moveToGoal(){
 	//bzero(&m_RecvBuffer, sizeof(m_RecvBuffer));
 	bzero(&m_SendBuffer, sizeof(m_SendBuffer));
 	messageSize = sprintf(m_SendBuffer, "102 MOVE\a\b");
-	send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
-	receivePackage(recvSize, &timeout, receivedPackage);
-	if (recvSize > 2){
-		if (sscanf(receivedPackage, "%2s%d%d", okStr, &x1, &y1) != 3 
+	while (true){
+		send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+		if(receivePackage(recvSize, &timeout, receivedPackage) != 0)  {
+   	    	messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
+	    		send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+	    		return false;
+		}
+		if (recvSize > 2){
+			if (sscanf(receivedPackage, "%2s%d%d", okStr, &x1, &y1) != 3 
 					|| !checkMove(receivedPackage)){
-			messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
-	   	 send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
-			return false;
+				messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
+	   	 		send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+				return false;
 
 		}
-		cout << "( "<< x1 <<" , " << y1 << " )" << endl;
-		this->m_Coordinates.setX(x1);
-		this->m_Coordinates.setY(y1);
-		this->m_Coordinates.setDir(x1-x, y1-y);
-		cout << m_Coordinates.getDir() << endl;
-		bzero(&receivedPackage, sizeof(receivedPackage));
-	}
-	else {
-	   messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
-	   send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
-	   return false;
+			cout << "( "<< x1 <<" , " << y1 << " )" << endl;
+			this->m_Coordinates.setX(x1);
+			this->m_Coordinates.setY(y1);
+			this->m_Coordinates.setDir(x1-x, y1-y);
+			if (x1 != x || y1 != y) break;
+			cout << m_Coordinates.getDir() << endl;
+			bzero(&receivedPackage, sizeof(receivedPackage));
+		}
+		else {
+	   		messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
+	   		send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
+	   		return false;
+		}
 	}
 	while (!m_Coordinates.isInSquare()){
 		//std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -547,10 +584,10 @@ bool CRobotClient::moveToGoal(){
 
 
 int const CRobotClient::neighs[4][2] = {
+        {-1,  0},
         { 0,  1},
         { 1,  0},
-        { 0, -1},
-        {-1,  0}
+        { 0, -1}
 };
 
 bool CRobotClient::DFS(int i, int j, struct timeval * timeout) 
@@ -560,19 +597,23 @@ bool CRobotClient::DFS(int i, int j, struct timeval * timeout)
     myStack.push(make_pair(i, j));
     while (!myStack.empty()){
         pair<int, int> cur = myStack.top();
-	visited.insert((cur.first+2)*5+(cur.second+2));
+	cout << ">>Vertex: " << cur.first << ", " << cur.second << endl; 
         myStack.pop();
-	if (!moveTo(cur.first, cur.second, timeout)) return false;
-	if (tryPickUp(timeout)) {
-		close(m_Socket);
-		return true;
-	}
+	if (visited.find((cur.first+2)*5+(cur.second+2)) == visited.end()){
+		visited.insert((cur.first+2)*5+(cur.second+2));
+		if (!moveTo(cur.first, cur.second, timeout)) return false;
+		if (tryPickUp(timeout)) {
+			close(m_Socket);
+			return true;
+		}
 
-    	for (int k = 0; k < 4; k++){
-		int i0 = i + neighs[k][0], j0 = j + neighs[k][1];
-		if(abs(i0) <= 2 && abs(j0) <= 2 && visited.find((i0+2)*5+(j0+2)) == visited.end())
+    		for (int k = 0; k < 4; k++){
+			int i0 = cur.first + neighs[k][0], j0 = cur.second + neighs[k][1];
+			cout << "<<check vert: " << i0 << ", " << j0 << endl;
+			if(abs(i0) < 3 && abs(j0) < 3 && visited.find((i0+2)*5+(j0+2)) == visited.end())
 			myStack.push(make_pair(i0, j0));
-	}
+		}
+    	}
     }
     int messageSize = sprintf(m_SendBuffer, "301 SYNTAX ERROR\a\b");
     send(m_Socket, m_SendBuffer, messageSize, MSG_NOSIGNAL);
